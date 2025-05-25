@@ -3,8 +3,9 @@ import asyncio
 import logging
 import uuid
 import requests
-import json
+import json  # ✅ keep this
 import secrets
+import os
 
 import voluptuous as vol
 
@@ -13,11 +14,12 @@ from homeassistant.components import http
 from homeassistant.components.http.data_validator import RequestDataValidator
 from homeassistant.helpers import intent
 import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers.json import load_json, save_json
+from homeassistant.helpers.json import save_json
 from homeassistant.components import websocket_api
-from homeassistant.const import (CONF_PASSWORD, CONF_USERNAME)
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 
-import aiohttp #handle http requests
+import aiohttp  # handle http requests
+
 
 ATTR_NAME = "name"
 
@@ -271,31 +273,36 @@ class ShoppingData:
         """Load items."""
 
         async def load():
-            """Load the items synchronously."""
+            """Load the items from ICA API or fallback to local file."""
             URI = "/api/user/offlineshoppinglists"
             api_data = await Connect.get_request(URI)
             _LOGGER.debug(api_data)
-            
-            if api_data is None:
-                _LOGGER.error("Failed to load shopping list data")
-                return
-            
-            _LOGGER.debug("Adding to ica: " + str(api_data))
-            for row in api_data["Rows"]:
-                name = row["ProductName"].capitalize()
-                uuid = row["OfflineId"]
-                complete = row["IsStrikedOver"]
-                source = row["SourceId"]
 
-                item = {"name": name, "id": uuid, "complete": complete, "SourceId": source}
-                _LOGGER.debug("Item: " + str(item))
-                self.items.append(item)
+            if api_data and "Rows" in api_data:
+                _LOGGER.debug("Adding to ica: %s", api_data)
+                for row in api_data["Rows"]:
+                    name = row["ProductName"].capitalize()
+                    uuid = row["OfflineId"]
+                    complete = row["IsStrikedOver"]
+                    source = row["SourceId"]
 
-            _LOGGER.debug("Items: " + str(self.items))
+                    item = {"name": name, "id": uuid, "complete": complete, "SourceId": source}
+                    _LOGGER.debug("Item: %s", item)
+                    self.items.append(item)
+
+                _LOGGER.debug("Items: %s", self.items)
+                return self.items
+
+            # fallback if API is None or invalid
+            _LOGGER.warning("API failed or returned no rows, loading items from local file")
+            path = self.hass.config.path(PERSISTENCE)
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    self.items = json.load(f)
+            else:
+                self.items = []
+
             return self.items
-#            return load_json(self.hass.config.path(PERSISTENCE), default=[])
-
-        self.items = await self.hass.async_add_job(load)
 
     def save(self):
         """Save the items."""
